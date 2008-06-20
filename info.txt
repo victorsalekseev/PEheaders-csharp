@@ -1,0 +1,269 @@
+Cекции
+
+За всеми заголовками в файле следуют тела секций. В Microsoft исторически сложились такие устойчивые названия секций: ".text", ".bss", ".data", ".rdata", ".edata", ".idata", ".rsrc", ".debug" и некоторые другие. Однако совсем не обязательно чтобы секции имели такие названия. Например, компиляторы от фирмы Inprise (бывшая Borland) присваивают секциям имена вида CODE, DATA и т.п. Кроме того, программист может создавать дополнительные секции со своими названиями. Наличие точки в начале секции также необязательно. Секции расположены вплотную друг к другу без промежутков, но это совсем не значит, что в самих секциях не бывает пустых мест. Каждая стандартная секция имеет определенное назначение, например:
+
+в ".text" распложен код программы;
+
+в ".bss" размещаются неинициализированные данные;
+
+в ".data" - инициализированные данные;
+
+в ".edata" – функции, экспортируемые файлом;
+
+в ".idata" - таблицы импортируемых функций;
+
+в ".rsrc" – ресурсы;
+
+в сегменте ".rdata" - данные только для чтения (строки, константы, информация отладочного каталога).
+
+Но это назначение секций не строгое, например, ".text" вполне может быть начинен обычными данными, а также экспортируемыми функциями. Некоторые секции имеют особый формат, сейчас внимание сосредоточу на них.
+
+Секция экспорта (.edata)
+
+В секции .edata представлен перечень функций и данных, которые PE-файл экспортирует для использования сторонними модулями. Сегмент экспорта стандартно состоит из следующих частей:
+
+1. оглавление;
+
+2. таблица указателей на экспортируемые имена;
+
+3. таблица порядковых номеров функций;
+
+4. таблица экспортируемых имен.
+
+Оглавление представлено вот такой структурой:
+
+typedef struct _IMAGE_EXPORT_DIRECTORY {
+
+DWORD Characteristics;
+
+DWORD TimeDateStamp;
+
+WORD MajorVersion;
+
+WORD MinorVersion;
+
+DWORD Name;
+
+DWORD Base;
+
+DWORD NumberOfFunctions;
+
+DWORD NumberOfNames;
+
+DWORD AddressOfFunctions; // RVA from base of image
+
+DWORD AddressOfNames; // RVA from base of image
+
+DWORD AddressOfNameOrdinals; // RVA from base of image
+
+} IMAGE_EXPORT_DIRECTORY, *PIMAGE_EXPORT_DIRECTORY;
+
+Characteristics - в настоящее время не используется.
+
+TimeDateStamp - время создания таблицы экспорта.
+
+MajorVersion и MinorVersion - старший и младший номер версии файла.
+
+Name - имя файла.
+
+Base - начальный порядковый номер для экспортируемых функций (обычно 1).
+
+NumberOfFunctions и NumberOfNames - содержат количество функций и имен функций, экспортируемых из файла.
+
+AddressOfFunctions - относительный виртуальный адрес (RVA) на таблицу указателей экспортируемых функций.
+
+AddressOfNames - это относительный виртуальный адрес (RVA) на таблицу экспортируемых имен.
+
+AddressOfNameOrdinals - это относительный виртуальный адрес (RVA) на таблицу порядковых номеров функций.
+
+Все три таблицы связаны между собой особым образом.
+
+Секция импорта (.idata)
+
+Секция импорта содержит информацию о функциях и данных, которые файл импортирует из библиотек DLL. Секция .idata состоит из последовательности таблиц импорта, каждая из которых представлена структурой IMAGE_IMPORT_DESCRIPTOR. Каждая такая структура соответствует одной DLL, из которой программа импортирует функции. Последняя структура в последовательности имеет нулевые поля. Вот формат этой структуры из файла winnt.h:
+
+typedef struct _IMAGE_IMPORT_DESCRIPTOR {
+
+union {
+
+DWORD Characteristics; // 0 for terminating null import descriptor
+
+DWORD OriginalFirstThunk; // RVA to original unbound IAT (PIMAGE_THUNK_DATA)
+
+};
+
+DWORD TimeDateStamp; // 0 if not bound,
+
+// -1 if bound, and real date\time stamp
+
+// in IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT (new BIND)
+
+// O.W. date/time stamp of DLL bound to (Old BIND)
+
+DWORD ForwarderChain; // -1 if no forwarders
+
+DWORD Name;
+
+DWORD FirstThunk; // RVA to IAT (if bound this IAT has actual addresses)
+
+} IMAGE_IMPORT_DESCRIPTOR;
+
+typedef IMAGE_IMPORT_DESCRIPTOR UNALIGNED *PIMAGE_IMPORT_DESCRIPTOR;
+
+Первое поле является объединением (union) и принимает такие значения: либо 0 (Characteristics), если структура является последней в последовательности, либо указатель (OriginalFirstThunk) на последовательность структур типа IMAGE_THUNK_DATA (о ней читай ниже).
+
+TimeDateStamp - время создания файла, из которого импортируются функции (чаще всего имеет нулевое значение).
+
+ForwarderChain - переадресация к другой DLL, если возникает такая необходимость.
+
+Name - имя библиотеки, которой соответствует текущая структура IMAGE_IMPORT_DESCRIPTOR.
+
+FirstThunk - еще один указатель на структуру типа IMAGE_THUNK_DATA.
+
+#include "poppack.h" // Back to 4 byte packing
+
+typedef struct _IMAGE_THUNK_DATA32 {
+
+union {
+
+PBYTE ForwarderString;
+
+PDWORD Function;
+
+DWORD Ordinal;
+
+PIMAGE_IMPORT_BY_NAME AddressOfData;
+
+} u1;
+
+} IMAGE_THUNK_DATA32;
+
+typedef IMAGE_THUNK_DATA32 * PIMAGE_THUNK_DATA32;
+
+Как видно, структура IMAGE_THUNK_DATA содержит в себе объединение. Если функция импортируется по порядковому номеру, значение объединения расценивается как Ordinal. Если функция импортируется по имени, объединение интерпретируется как указатель на структуру типа IMAGE_IMPORT_BY_NAME (AddressOfData). Эта структура в файле winnt.h описана следующим образом:
+
+typedef struct _IMAGE_IMPORT_BY_NAME {
+
+WORD Hint;
+
+BYTE Name[1];
+
+} IMAGE_IMPORT_BY_NAME, *PIMAGE_IMPORT_BY_NAME;
+
+Здесь поле Hint является подсказкой, облегчающей поиск указателя на функцию.
+
+Name - указатель на строку с именем импортируемой функции.
+
+Сегмент ресурсов (.rsrc)
+
+Ресурсы имеют довольно сложную иерархическую структуру. В начале секции ресурсов расположено оглавление, которое представлено вот такой структурой:
+
+typedef struct _IMAGE_RESOURCE_DIRECTORY {
+
+DWORD Characteristics;
+
+DWORD TimeDateStamp;
+
+WORD MajorVersion;
+
+WORD MinorVersion;
+
+WORD NumberOfNamedEntries;
+
+WORD NumberOfIdEntries;
+
+// IMAGE_RESOURCE_DIRECTORY_ENTRY DirectoryEntries[];
+
+} IMAGE_RESOURCE_DIRECTORY, *PIMAGE_RESOURCE_DIRECTORY;
+
+Здесь интересны только два поля: NumberOfNamedEntries и NumberOfIdEntries, которые показывают число ресурсов, идентифицируемых по имени, и число ресурсов, идентифицируемых по номеру. Сразу за оглавлением расположена таблица ресурсов, каждая строка которой представлена структурой:
+
+typedef struct _IMAGE_RESOURCE_DIRECTORY_ENTRY {
+
+union {
+
+struct {
+
+DWORD NameOffset:31;
+
+DWORD NameIsString:1;
+
+};
+
+DWORD Name;
+
+WORD Id;
+
+};
+
+union {
+
+DWORD OffsetToData;
+
+struct {
+
+DWORD OffsetToDirectory:31;
+
+DWORD DataIsDirectory:1;
+
+};
+
+};
+
+} IMAGE_RESOURCE_DIRECTORY_ENTRY, *PIMAGE_RESOURCE_DIRECTORY_ENTRY;
+
+Видно, что каждая строка таблицы состоит из двух объединений. Первое из них определяет, как идентифицируется ресурс: по имени или по номеру. Если старший бит первого объединения установлен в единицу, то ресурс идентифицируется по имени. Если в 0 - то по ID. Поле OffsetToData всегда используется для указания на потомка либо в ветви дерева, либо в конечном узле. Если первый бит второго объединения установлен в единицу, то OffsetToData указывает на потомка в ветви дерева. Если в 0, то на конечный узел. Конечные узлы - это низшие узлы в дереве ресурсов, которые определяют размер и местоположение непосредственно данных ресурса. Каждый конечный узел представляет собой структуру IMAGE_RESOURCE_DATA_ENTRY:
+
+typedef struct _IMAGE_RESOURCE_DATA_ENTRY {
+
+ULONG OffsetToData;
+
+ULONG Size;
+
+ULONG CodePage;
+
+ULONG Reserved;
+
+} IMAGE_RESOURCE_DATA_ENTRY, *PIMAGE_RESOURCE_DATA_ENTRY;
+
+OffsetToData и Size указывают местоположение и размер непосредственно данных ресурса. CodePage - номер кодовой страницы, которая должна использоваться при декодировании данных. Последнее поле в структуре зарезервировано.
+
+На рисунке можно увидеть примерную иерархию ресурсов в файле, а за рассматриванием рисунка нужно запомнить, что данные каждого отдельного ресурса (меню, диалоги, иконки, кнопки и т.д.), на которые указывает OffsetToData конечного узла, также могут иметь собственную особую структуру. 
+
+Стандартные идентификаторы ресурсов можно найти в заголовочном файле winuser.h:
+
+/*
+
+* Предопределенные типы ресурсов
+
+*/
+
+#define RT_CURSOR MAKEINTRESOURCE(1)
+
+#define RT_BITMAP MAKEINTRESOURCE(2)
+
+#define RT_ICON MAKEINTRESOURCE(3)
+
+#define RT_MENU MAKEINTRESOURCE(4)
+
+#define RT_DIALOG MAKEINTRESOURCE(5)
+
+#define RT_STRING MAKEINTRESOURCE(6)
+
+#define RT_FONTDIR MAKEINTRESOURCE(7)
+
+#define RT_FONT MAKEINTRESOURCE(8)
+
+#define RT_ACCELERATOR MAKEINTRESOURCE(9)
+
+#define RT_RCDATA MAKEINTRESOURCE(10)
+
+#define RT_MESSAGETABLE MAKEINTRESOURCE(11)
+
+Резюме
+
+Я рассказал не обо всех существующих полях PE-формата, но даже моя статья демонстрирует громоздкую структуру имеет этот формат. Если кто-то возьмется описывать форматы всех известных ресурсов, то, вполне может быть, посвятит этому целую книгу!
+
+Существует множество утилит для просмотра и редактирования полей PE-файла. PE Tools от отечественных разработчиков не знает равных себе по мощности в этой области. На некоторых скриншотах к этой статье значения полей заголовков и секций реального PE-файла показаны именно благодаря PE Tools.
+
+
